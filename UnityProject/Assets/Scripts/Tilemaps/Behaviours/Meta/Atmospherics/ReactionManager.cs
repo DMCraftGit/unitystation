@@ -18,6 +18,7 @@ public class ReactionManager : MonoBehaviour
 
 	private Dictionary<Vector3Int, MetaDataNode> hotspots;
 	private UniqueQueue<MetaDataNode> winds;
+	private UniqueQueue<MetaDataNode> removeWinds;
 
 	private UniqueQueue<MetaDataNode> addFog; //List of tiles to add chemcial fx to
 	private UniqueQueue<MetaDataNode> removeFog; //List of tiles to remove the chemical fx from
@@ -36,6 +37,7 @@ public class ReactionManager : MonoBehaviour
 
 		hotspots = new Dictionary<Vector3Int, MetaDataNode>();
 		winds = new UniqueQueue<MetaDataNode>();
+		removeWinds = new UniqueQueue<MetaDataNode>();
 
 		addFog = new UniqueQueue<MetaDataNode>();
 		removeFog = new UniqueQueue<MetaDataNode>();
@@ -48,39 +50,47 @@ public class ReactionManager : MonoBehaviour
 		timePassed += Time.deltaTime;
 		timePassed2 += Time.deltaTime;
 
-		if ( timePassed2 >= 0.1 )
+
+		if (timePassed2 >= 0.1)
 		{
 			int count = winds.Count;
-			if ( count > 0 )
+			if (count > 0)
 			{
-				for ( int i = 0; i < count; i++ )
+				for (int i = 0; i < count; i++)
 				{
-					if ( winds.TryDequeue( out var windyNode ) )
+					if (winds.TryDequeue(out var windyNode))
 					{
-						foreach ( var pushable in matrix.Get<PushPull>( windyNode.Position, true ) )
+						foreach (var pushable in matrix.Get<PushPull>(windyNode.Position, true))
 						{
-							float correctedForce = windyNode.WindForce / ( int ) pushable.Pushable.Size;
-							if ( correctedForce >= AtmosConstants.MinPushForce )
+							float correctedForce = windyNode.WindForce / (int)pushable.Pushable.Size;
+							if (correctedForce >= AtmosConstants.MinPushForce)
 							{
-								if ( pushable.Pushable.IsTileSnap )
+								if (pushable.Pushable.IsTileSnap)
 								{
 									byte pushes = (byte)Mathf.Clamp((int)correctedForce / 10, 1, 10);
-									for ( byte j = 0; j < pushes; j++ )
+									for (byte j = 0; j < pushes; j++)
 									{
 										//converting push to world coords because winddirection is in local coords
-										pushable.QueuePush((transform.rotation * windyNode.WindDirection.To3Int()).To2Int(), Random.Range( ( float ) ( correctedForce * 0.8 ), correctedForce ) );
+										pushable.QueuePush((transform.rotation * windyNode.WindDirection.To3Int()).To2Int(), Random.Range((float)(correctedForce * 0.8), correctedForce));
 									}
-								} else
+								}
+								else
 								{
-									pushable.Pushable.Nudge( new NudgeInfo
+									pushable.Pushable.Nudge(new NudgeInfo
 									{
 										OriginPos = pushable.Pushable.ServerPosition,
 										Trajectory = (Vector2)windyNode.WindDirection,
 										SpinMode = SpinMode.None,
 										SpinMultiplier = 1,
 										InitialSpeed = correctedForce,
-									} );
+									});
 								}
+							}
+							if (correctedForce >= AtmosConstants.MinPushForce/2f)
+							{
+
+								tileChangeManager.UpdateTile(windyNode.Position, TileType.Effects, "WaterVapour");
+								removeWinds.Enqueue(windyNode);
 							}
 						}
 
@@ -93,7 +103,7 @@ public class ReactionManager : MonoBehaviour
 			timePassed2 = 0;
 		}
 
-		if (timePassed < 0.5)
+		if (timePassed < 0.2)
 		{
 			return;
 		}
@@ -128,18 +138,18 @@ public class ReactionManager : MonoBehaviour
 
 		//Here we check to see if chemical fog fx needs to be applied, and if so, add them. If not, we remove them
 		int addFogCount = addFog.Count;
-		if ( addFogCount > 0 )
+		if (addFogCount > 0)
 		{
-			for ( int i = 0; i < addFogCount; i++ )
+			for (int i = 0; i < addFogCount; i++)
 			{
-				if ( addFog.TryDequeue( out var addFogNode ) )
+				if (addFog.TryDequeue(out var addFogNode))
 				{
-					if( !hotspots.ContainsKey(addFogNode.Position) )  //Make sure the tile currently isn't on fire. If it is on fire, we don't want to overright the fire effect
+					if (!hotspots.ContainsKey(addFogNode.Position))  //Make sure the tile currently isn't on fire. If it is on fire, we don't want to overright the fire effect
 					{
 						tileChangeManager.UpdateTile(addFogNode.Position, TileType.Effects, "PlasmaAir");
 					}
 
-					else if( !removeFog.Contains(addFogNode) )  //If the tile is on fire, but there is still plasma on the tile, put this tile back into the queue so we can try again
+					else if (!removeFog.Contains(addFogNode))  //If the tile is on fire, but there is still plasma on the tile, put this tile back into the queue so we can try again
 					{
 						addFog.Enqueue(addFogNode);
 					}
@@ -149,13 +159,13 @@ public class ReactionManager : MonoBehaviour
 
 		//Similar to above, but for removing chemical fog fx
 		int removeFogCount = removeFog.Count;
-		if ( removeFogCount > 0 )
+		if (removeFogCount > 0)
 		{
-			for ( int i = 0; i < removeFogCount; i++ )
+			for (int i = 0; i < removeFogCount; i++)
 			{
-				if ( removeFog.TryDequeue( out var removeFogNode ) )
+				if (removeFog.TryDequeue(out var removeFogNode))
 				{
-					if( !hotspots.ContainsKey(removeFogNode.Position) ) //Make sure the tile isn't on fire, as we don't want to delete fire effects here
+					if (!hotspots.ContainsKey(removeFogNode.Position)) //Make sure the tile isn't on fire, as we don't want to delete fire effects here
 					{
 						tileChangeManager.RemoveTile(removeFogNode.Position, LayerType.Effects);
 					}
@@ -165,6 +175,15 @@ public class ReactionManager : MonoBehaviour
 				}
 			}
 		}
+
+		if (removeWinds.TryDequeue(out var removeWindyNode))
+		{
+			if (!hotspots.ContainsKey(removeWindyNode.Position)) //Make sure the tile isn't on fire, as we don't want to delete fire effects here
+			{
+				tileChangeManager.RemoveTile(removeWindyNode.Position, LayerType.Effects);
+			}
+		}
+
 
 		timePassed = 0;
 	}
@@ -288,28 +307,28 @@ public class ReactionManager : MonoBehaviour
 
 	}
 
-	public void AddWindEvent( MetaDataNode node, Vector2Int windDirection, float pressureDifference )
+	public void AddWindEvent(MetaDataNode node, Vector2Int windDirection, float pressureDifference)
 	{
-		if ( node != MetaDataNode.None && pressureDifference > AtmosConstants.MinWindForce
-		                               && windDirection != Vector2Int.zero )
+		if (node != MetaDataNode.None && pressureDifference > AtmosConstants.MinWindForce
+									   && windDirection != Vector2Int.zero)
 		{
 			node.WindForce = pressureDifference;
 			node.WindDirection = windDirection;
-			winds.Enqueue( node );
+			winds.Enqueue(node);
 		}
 	}
 
 	//Add tile to add fog effect queue
 	//Being called by AtmosSimulation
-	public void AddFogEvent( MetaDataNode node)
+	public void AddFogEvent(MetaDataNode node)
 	{
-		addFog.Enqueue( node );
+		addFog.Enqueue(node);
 	}
 
 	//Add tile to remove fog effect queue
 	//Being called by AtmosSimulation
-	public void RemoveFogEvent( MetaDataNode node)
+	public void RemoveFogEvent(MetaDataNode node)
 	{
-		removeFog.Enqueue( node );
+		removeFog.Enqueue(node);
 	}
 }
